@@ -24,32 +24,21 @@ def solve():
     )
 
     model = cp_model.CpModel()
-
-    # --- x[i,j]: BoolVar ---
     x = {}
     for i in range(N + 1):
         for j in range(N + 1):
             if i != j:
                 x[i, j] = model.NewBoolVar(f"x[{i}][{j}]")
-
-    # --- start[i]: thời điểm bắt đầu phục vụ ---
     start = [None] * (N + 1)
     start[0] = model.NewIntVar(0, 0, "start[0]")
     for i in range(1, N + 1):
         start[i] = model.NewIntVar(e[i], l[i], f"start[{i}]")
-
-    # ---- CONSTRAINTS ----
-
-    # 1. AddCircuit thay thế MTZ + flow constraints
-    # Nodes: 0..N, arcs: (i, j, x[i,j])
     arcs = []
     for i in range(N + 1):
         for j in range(N + 1):
             if i != j:
                 arcs.append((i, j, x[i, j]))
     model.AddCircuit(arcs)
-
-    # 2. Time propagation: nếu x[i,j]=1 thì start[j] >= start[i] + d[i] + t[i][j]
     M = max_time
     for i in range(N + 1):
         for j in range(1, N + 1):
@@ -57,17 +46,12 @@ def solve():
                 model.Add(
                     start[j] >= start[i] + d[i] + t[i][j] - M * (1 - x[i, j])
                 )
-
-    # 3. Objective: minimize tổng travel time
     total_travel = sum(
         t[i][j] * x[i, j]
         for i in range(N + 1)
         for j in range(N + 1)
         if i != j
     )
-    model.Minimize(total_travel)
-
-    # ---- SOLVE ----
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 55.0
     solver.parameters.num_search_workers = 8
@@ -87,7 +71,6 @@ def solve():
         print(N)
         print(" ".join(map(str, route)))
     else:
-        # Greedy fallback
         unvisited = list(range(1, N + 1))
         route = []
         current = 0
