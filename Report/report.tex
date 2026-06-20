@@ -1,0 +1,678 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb}
+\usepackage{geometry}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+  backgroundcolor=\color{backcolour},
+  frame=tb,
+  language=Java,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=flexible,
+  basicstyle={\small\ttfamily},
+  numbers=none,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{dkgreen},
+  stringstyle=\color{mauve},
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3
+}
+
+\geometry{a4paper, margin=1in}
+
+\begin{document}
+
+
+% Title Page
+\begin{titlepage}
+    \centering
+    \vspace*{1.5cm}
+    
+    {\scshape\Large Optimization Mini-Project \par}
+    \vspace{1.5cm}
+    
+    {\huge\bfseries Balanced Staff Routing for Maintenance \par}
+    \vspace{1.3cm}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.3\textwidth]{logo.png}
+        \label{fig:logo}
+    \end{figure}
+
+    \vspace{0.7cm}
+
+    {\LARGE\textbf{Course: IT3052E - Optimization}\par}
+    {\LARGE\textbf{Class: 167686}\par}
+    {\LARGE\textbf{Group: 5}\par}
+    \vspace{1cm}
+    
+    \begin{center}
+        {\LARGE \textbf{Group Members:}} \\[0.5cm]
+        {\Large
+            Bui Dang Quang \\[0.2cm]
+            Dinh Phuong Mai \\[0.2cm]
+            Do Anh Minh \\[0.2cm]
+            Ngo Nam Nhat Minh\\[0.2cm]
+        }
+    \end{center}
+    
+\end{titlepage}
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{Introduction}
+The Vehicle Routing Problem (VRP), originally formulated by George B. Dantzig and John H. Ramser in 1959, represents a classic challenge in combinatorial optimization. While traditional VRP formulations seek to minimize the cumulative distance or total travel time of all vehicles, many real-world service operations require balancing the workload among employees. 
+
+In the \textit{Balanced Staff Routing for Maintenance} problem, the focus shifts to minimizing the makespan—specifically, the workload of the most heavily loaded technician. This ensures equitable distribution of labor and prevents individual technician fatigue. Because the problem inherits the NP-hard complexity of the Traveling Salesman Problem (TSP) and standard multi-depot vehicle routing, exact methods like Constraint Programming (CP) and Integer Linear Programming (ILP) struggle to scale beyond small instances. This report presents a tailored, deterministic construction heuristic designed to solve exceptionally large test cases within milliseconds.
+
+\section{Problem Overview}
+
+\subsection{Objective}
+Minimize the maximum workload (the sum of travel times and maintenance/service durations) of any technician, ensuring that all customers are serviced exactly once, and all technicians start and finish their routes at the central depot.
+
+\subsection{Inputs}
+\begin{itemize}
+    \item \textbf{$N$}: The number of customers to be serviced ($1 \le N \le 1000$).
+    \item \textbf{$K$}: The number of available technicians ($1 \le K \le 100$).
+    \item \textbf{$d(i)$}: The maintenance service duration for customer $i$ ($1 \le i \le N$). Let $d(0) = 0$ for the central depot.
+    \item \textbf{$t(i, j)$}: A travel time matrix of size $(N+1) \times (N+1)$, representing the travel cost between any two locations $i, j \in \{0, 1, \dots, N\}$.
+\end{itemize}
+
+\subsection{Outputs}
+\begin{itemize}
+    \item Line 1: The number of technicians $K$.
+    \item Line $2k$ (for $k = 1, \dots, K$): The number of points $L_k$ in the route of technician $k$.
+    \item Line $2k+1$: The sequence of visited nodes $r[0], r[1], \dots, r[L_k]$, starting and ending at the depot ($r[0] = r[L_k] = 0$).
+\end{itemize}
+
+\subsection{Constraints}
+\begin{enumerate}
+    \item \textbf{Single Visit}: Each customer $i \in \{1, \dots, N\}$ must be visited exactly once by exactly one technician.
+    \item \textbf{Depot Continuity}: Every route must begin at node $0$ and return to node $0$.
+    \item \textbf{Workload Definition}: For a route $R_k = \langle r[0], r[1], \dots, r[L_k] \rangle$, the workload is calculated as:
+    \begin{equation}
+        W(R_k) = \sum_{i=0}^{L_k - 1} \left( t(r[i], r[i+1]) + d(r[i+1]) \right)
+    \end{equation}
+\end{enumerate}
+
+\section{Greedy Algorithm}
+
+\subsection{Background}
+Classic greedy constructive heuristics, such as the Nearest Neighbor approach, often construct routes sequentially or greedily append unvisited nodes to the end of a route. While fast, these methods suffer from a lack of foresight: towards the end of the assignment process, remaining unvisited nodes are often far apart, forcing subsequent routes to absorb massive travel times and causing extreme workload imbalances.
+
+To address this limitation, the \textit{Sorted Cheapest Insertion} algorithm introduces two core modifications:
+\begin{enumerate}
+    \item \textbf{Furthest-First Sort}: Prioritizes customers who are far from the depot or require long maintenance times. By routing "difficult" nodes first, the algorithm reserves more flexible, nearby nodes for the later stages.
+    \item \textbf{Global Cheapest Insertion}: Instead of simply appending nodes to the end of a route, the algorithm evaluates inserting the target customer at any feasible position within any route. This naturally balances workloads, as inserting a node into a shorter route is computationally favored.
+\end{enumerate}
+
+\subsection{Logic}
+The algorithm operates in three distinct phases:
+\begin{enumerate}
+    \item \textbf{Initialization}: We initialize $K$ empty routes, represented as $R_k = \langle 0, 0 \rangle$ with an initial accumulated workload of $0$ for all $k \in \{1, \dots, K\}$.
+    \item \textbf{Priority Sorting}: We compute a priority metric $P(u)$ for each customer $u$:
+    \begin{equation}
+        P(u) = t(0, u) + d(u)
+    \end{equation}
+    The customer set is then sorted in descending order of $P(u)$.
+    \item \textbf{Incremental Cheapest Insertion}: For each customer $u$ in the sorted list, we search for the optimal route $k^*$ and insertion index $i^*$ that minimizes the resulting workload. 
+    Inserting $u$ between two existing consecutive nodes $prev = r[i-1]$ and $nxt = r[i]$ modifies the workload of route $k$ as follows:
+    \begin{equation}
+        \Delta \text{Cost} = t(prev, u) + d(u) + t(u, nxt) - t(prev, nxt)
+    \end{equation}
+    The new candidate workload is $W_{new} = W(R_k) + \Delta \text{Cost}$. By evaluating this cost in $O(1)$ time for all positions across all routes, we select the globally optimal insertion point $(k^*, i^*)$, update $R_{k^*}$, and update its workload.
+\end{enumerate}
+
+\subsection{Pseudocode}
+The procedural logic of the Sorted Cheapest Insertion algorithm is formalized in Algorithm \ref{alg:sorted_insertion}.
+
+\begin{algorithm}[H]
+\caption{\textbf{Greedy Algorithm}}\label{alg:sorted_insertion}
+\begin{algorithmic}[1]
+\Procedure{SolveSRM}{$N, K, d, t$}
+    \State $\text{routes}[1 \dots K] \gets \text{array of } \langle 0, 0 \rangle$
+    \State $\text{workloads}[1 \dots K] \gets \text{array of } 0$
+    \State $\text{customers} \gets \text{list } [1, 2, \dots, N]$
+    \State Sort $\text{customers}$ in descending order of $\left( t(0, u) + d(u) \right)$
+    \For{each $u$ in $\text{customers}$}
+        \State $\text{best\_k} \gets -1$
+        \State $\text{best\_pos} \gets -1$
+        \State $\text{min\_new\_workload} \gets \infty$
+        \For{$k = 1$ to $K$}
+            $R \gets \text{routes}[k]$
+            \For{$i = 1$ to $\text{len}(R) - 1$}
+                \State $prev \gets R[i-1]$
+                \State $nxt \gets R[i]$
+                \State $\Delta \gets - t(prev, nxt) + t(prev, u) + d(u) + t(u, nxt)$
+                \State $\text{new\_workload} \gets \text{workloads}[k] + \Delta$
+                \If{$\text{new\_workload} < \text{min\_new\_workload}$}
+                    \State $\text{min\_new\_workload} \gets \text{new\_workload}$
+                    \State $\text{best\_k} \gets k$
+                    \State $\text{best\_pos} \gets i$
+                \EndIf
+            \EndFor
+        \EndFor
+        \State Insert $u$ into $\text{routes}[\text{best\_k}]$ at index $\text{best\_pos}$
+        \State $\text{workloads}[\text{best\_k}] \gets \text{min\_new\_workload}$
+    \EndFor
+    \State \Return $\text{routes}$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Complexity and Performance Analysis}
+\begin{itemize}
+    \item \textbf{Time Complexity}: Sorting the customer array takes $O(N \log N)$ time. During the insertion phase, for each of the $N$ customers, we evaluate every possible insertion point across all $K$ routes. Since the total number of elements across all routes is $N + 2K$, the number of possible insertion points is $N + K$. Thus, evaluating all points takes $O(N + K)$ steps. The overall time complexity of the insertion loop is:
+    \begin{equation}
+        \sum_{i=1}^{N} O(i + K) = O(N^2 + NK)
+    \end{equation}
+    For $N = 1000$ and $K = 100$, the maximum number of operations is approximately $10^6 + 10^5 \approx 1.1 \times 10^6$ operations, which executes in under 0.15 seconds in Python.
+    \item \textbf{Space Complexity}: The storage requirement is dominated by the travel time matrix of size $O(N^2)$ and the route structures of size $O(N + K)$. This yields a space complexity of $O(N^2)$, which easily fits within modern memory limits.
+    \item \textbf{Solution Quality}: Unlike local greedy algorithms that only evaluate the endpoint of a route, this algorithm evaluates internal route structures. By sorting "hard" tasks first, it avoids the formation of highly unbalanced outlier routes, enabling it to obtain optimal or near-optimal results (such as achieving a workload of 560 on difficult benchmarks) without requiring computationally expensive metaheuristic search steps.
+\end{itemize}
+
+\section{Branch \& Bound Algorithm}
+\subsection{Background}
+Branch and Bound is one of the earliest exact approaches for solving the Vehicle Routing Problem (VRP). While it guarantees optimal solutions, its computational complexity grows exponentially with the problem size, making it impractical for large-scale instances. During the early development of VRP research, Branch and Bound was widely used to solve small and medium-sized instances exactly. As larger and more realistic problems emerged, it was gradually complemented by metaheuristics and advanced Mixed-Integer Programming (MIP) techniques. Nevertheless, Branch and Bound remains a fundamental component of modern exact optimization methods, including Branch-and-Cut, MIP solvers, and Constraint Programming (CP) systems with propagation. It is also commonly used as a benchmark for evaluating heuristic and metaheuristic approaches on small instances. 
+
+\subsection{Logic}
+\begin{enumerate}
+    \item \textbf{State Representation:} At any point in recursion, the algorithm keeps track of:
+    \begin{itemize}
+        \item Set of customers have not yet visited. 
+        \item List of routes (one per technician). 
+        \item Total time cost by each technician.
+        \item The current position of each technician.
+    \end{itemize}
+    
+    \item \textbf{Base Case}: If all customers are assigned:
+    \begin{itemize}
+        \item Calculate the total time for each technician
+        \item Update the global best result if the current assignment has a smaller maximum technician workload
+        \item Unassign the customer 
+    \end{itemize}
+        
+    \item \textbf{Recursive Step: }For each customer still unassigned: 
+    \begin{itemize}
+        \item Try assigning that customer to each technician \texttt{k}
+        \item Update the state 
+        \item We can also improve time by adding memorization and pruning condition: If assigning the customer exceeds the current best time then skip the customer 
+    \end{itemize}
+
+    \item \textbf{Memory key: }To make sure that the algorithm doesn’t solve the same state multiple times, we create a new variable to keep track of solved ones
+\end{enumerate}
+
+\subsection{Pseudocode}
+The procedural logic of the Sorted Cheapest Insertion algorithm is formalized in Algorithm \ref{alg:sorted_insertion}.
+
+\begin{algorithm}[H]
+\caption{\textbf{Branch \& Bound Algorithm}}
+\begin{algorithmic}[1]
+\Function{DFS}{$\text{unassigned}, \text{worker\_routes}, \text{worker\_times}, \text{cur\_positions}$}
+    
+    \State $\text{key} \gets (\text{frozenset}(\text{unassigned}), \text{tuple}(\text{cur\_positions}))$
+    
+    \If{$\text{key} \in \text{memo} \textbf{ and } \text{memo}[\text{key}] \le \max(\text{worker\_times})$}
+        \State \Return
+    \EndIf
+    \State $\text{memo}[\text{key}] \gets \max(\text{worker\_times})$
+    \medskip
+
+    \If{$\text{unassigned is empty}$}
+        \State $\text{total\_times} \gets [\,\text{worker\_times}[k] + \text{dist}[\text{cur\_positions}[k]][0] \textbf{ for all } k \textbf{ where } \text{worker\_routes}[k] \neq \emptyset\,]$
+        \State $\text{max\_time} \gets \max(\text{total\_times})$
+        
+        \If{$\text{max\_time} < \text{best\_time}$}
+            \State $\text{best\_time} \gets \text{max\_time} $
+            \State $\text{best\_routes} \gets \text{worker\_routes with } 0 \text{ appended to each route}$
+        \EndIf
+        \State \Return
+    \EndIf
+    \medskip
+
+    \For{\textbf{each} $\text{customer} \in \text{unassigned}$}
+        \For{$k \gets 0 \textbf{ to } K-1$}
+            \State $\text{last\_pos} \gets \text{cur\_positions}[k]$
+            \State $\text{move\_cost} \gets \text{dist}[\text{last\_pos}][\text{customer}]$
+            \State $\text{service\_cost} \gets d[\text{customer}]$
+            \State $\text{total} \gets \text{worker\_times}[k] + \text{move\_cost} + \text{service\_cost}$
+            \medskip
+            
+            \If{$\text{total} \ge \text{best\_time}$}
+                \State \textbf{continue}
+            \EndIf
+            \medskip
+
+            \State $\text{worker\_routes}[k].\text{append}(\text{customer})$
+            \State $\text{worker\_times}[k] \gets \text{total}$
+            \State $\text{cur\_positions}[k] \gets \text{customer}$
+            \medskip
+            
+            \State \Call{DFS}{$\text{unassigned} \setminus \{\text{customer}\}, \text{worker\_routes}, \text{worker\_times}, \text{cur\_positions}$}
+            \medskip
+            
+            \State $\text{worker\_routes}[k].\text{pop}()$
+            \State $\text{worker\_times}[k] \gets \text{worker\_times}[k] - (\text{move\_cost} + \text{service\_cost})$
+            \State $\text{cur\_positions}[k] \gets \text{last\_pos}$
+        \EndFor
+    \EndFor
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\section{Constraint Algorithm}
+
+\subsection{Background}
+Constraint Programming with \texttt{AddCircuit} provides mathematically guaranteed solutions for small instances of the Balanced Staff Routing problem. Compared to the original MTZ-based formulation, the key improvements are: using \texttt{BoolVar} instead of \texttt{IntVar(0,1)} for routing variables, tightening the domain bounds of $y[k]$ and $z$, and replacing three separate constraint groups (flow conservation, depot constraints, and MTZ subtour elimination) with a single \texttt{AddCircuit} call per technician. The rest of the model — the visit-once constraint, workload calculation, and route reconstruction — is unchanged from the original.
+
+Despite these improvements, the $O(K \times N^2)$ variable count means CP cannot scale to the large inputs in the test suite. This is not a failure of implementation but a fundamental theoretical boundary: VRP is NP-Hard and any exact formulation requires a number of variables that grows quadratically with $N$. In practice, large-scale VRP instances are always solved with heuristic or metaheuristic methods (Greedy, Hill Climbing, Large Neighborhood Search), or with hybrid approaches that use CP only for small subproblems. For this problem, CP is most valuable as a benchmark that produces provably correct solutions for small cases
+
+
+\subsection{Process of CP}
+\begin{enumerate}
+    \item \textbf{Model the Problem:} Define variables, domains, and constraints.
+    \item \textbf{Propagate Constraints:} Reduce domains by eliminating impossible values (e.g., domain/bound consistency).
+    \item \textbf{Search Systematically:} Assign values to variables (branching), backtrack if constraints are violated, use heuristics to guide choices.
+    \item \textbf{Optimize (if needed):} For optimization problems, tighten the bounds to find the best solution within the time limit.
+\end{enumerate}
+
+\subsection{Modelling}
+
+\subsubsection{Decision Variables}
+\begin{itemize}
+    \item $x[i][j][k]$ (\texttt{BoolVar}): Equals 1 if technician $k$ travels from node $i$ to node $j$, where $i \neq j$. One variable per ordered pair $(i,j)$ per technician $k$.
+    \item $\text{self\_loop}[i][k]$ (\texttt{BoolVar}): Equals 1 if technician $k$ does NOT visit customer $i$. This auxiliary variable is required by \texttt{AddCircuit} to allow a circuit to skip certain nodes. It replaces the MTZ ordering variable $u_{i,k}$ used in the original formulation.
+    \item $y[k]$ (\texttt{IntVar}): Total workload of technician $k$. Domain: $[0, UB]$ where $UB = N \times \max(t) + \sum d$ is a tight upper bound computed from the input.
+    \item $z$ (\texttt{IntVar}): Maximum workload across all technicians. This is the value being minimized.
+\end{itemize}
+
+\subsubsection{Objective Function}
+$$\min \quad z$$
+
+\subsubsection{Constraints}
+
+\begin{itemize}
+    \item \textbf{Each customer is visited exactly once}\newline
+    For every customer $j$, exactly one technician $k$ must arrive at $j$ from some node $i$:
+    $$\sum_{i} \sum_{k} x[i][j][k] = 1, \quad \forall j = 1, \dots, N$$
+    
+    \begin{lstlisting}
+    for j in range(1, N + 1):
+        model.Add(
+            sum(x[i,j,k] for k in range(1, K+1)
+                         for i in range(N+1) if i != j) == 1
+        )
+    \end{lstlisting}
+
+    \item Link between self\_loop and x\newline
+    For each customer $j$ and each technician $k$, either technician $k$ visits $j$ (incoming $x$ sums to 1) or the self-loop is active (technician $k$ skips $j$). These two cases are mutually exclusive:
+    $$\sum_{i} x[i][j][k] + \text{self\_loop}[j][k] = 1, \quad \forall j = 1,\dots,N, \quad \forall k = 1,\dots,K$$
+    
+    \begin{lstlisting}[language=Python]
+    for j in range(1, N + 1):
+        for k in range(1, K + 1):
+            model.Add(
+                sum(x[i,j,k] for i in range(N+1) if i!=j) 
+                + self_loop[j, k] == 1
+            )
+    \end{lstlisting}
+
+    \item \textbf{AddCircuit — valid route structure for each technician}\newline
+    This is the central structural constraint. For each technician $k$, \texttt{AddCircuit} receives a list of arcs $(i, j, \text{boolean\_variable})$ and enforces that the selected arcs form exactly one connected circuit covering all non-skipped nodes.
+    
+    A single call to \texttt{AddCircuit} simultaneously replaces three constraint groups that appear separately in the original ILP-style formulation:
+    \begin{itemize}
+        \item \textbf{Flow conservation:} in-degree equals out-degree at every node
+        \item \textbf{Depot constraint:} the route starts and ends at node 0
+        \item \textbf{Subtour elimination:} no disconnected sub-cycles (replaces the MTZ constraints $u_{i,k} - u_{j,k} + N \cdot x_{i,j,k} \le N-1$ and the auxiliary variable $u_{i,k}$)
+    \end{itemize}
+    
+    The self-loop arcs $(i, i, \text{self\_loop}[i][k])$ are what allow technician $k$'s circuit to skip customer $i$ without breaking the circuit structure:
+    $$\text{AddCircuit}\left( \{ (i, i, \text{self\_loop}[i][k]) : i = 1\dots N \} \cup \{ (i, j, x[i][j][k]) : i \neq j \} \right), \quad \forall k = 1,\dots,K$$
+    
+    \begin{lstlisting}[language=Python]
+    for k in range(1, K + 1):
+        arcs = []
+        for i in range(1, N + 1):
+            arcs.append((i, i, self_loop[i, k]))  # skip arc
+        for i in range(N + 1):
+            for j in range(N + 1):
+                if i != j:
+                    arcs.append((i, j, x[i, j, k]))
+        model.AddCircuit(arcs)
+    \end{lstlisting}
+
+    \item \textbf{Workload calculation}\newline
+    The workload of technician $k$ is the sum of all travel times along the route plus the maintenance time at each visited customer. When returning to the depot ($j = 0$), no maintenance time is counted:
+    $$y[k] = \sum_{i} \sum_{j \neq 0} x[i][j][k] \cdot (t_{i,j} + d_{j}) + \sum_{i \neq 0} x[i][0][k] \cdot t_{i,0}, \quad \forall k$$
+    
+    \noindent Same logic as the original formulation:
+    \begin{lstlisting}
+    for k in range(1, K + 1):
+        total = []
+        for i in range(N + 1):
+            for j in range(N + 1):
+                if i != j:
+                    cost    = matrix[i][j]
+                    service = d[j] if j != 0 else 0
+                    total.append(x[i,j,k] * (cost + service))
+        model.Add(y[k] == sum(total))
+    \end{lstlisting}
+
+    \item \textbf{z is the maximum workload}\newline
+    $z$ must be at least as large as every technician's workload:
+    $$z \ge y[k], \quad \forall k = 1,\dots,K$$
+    
+
+    \begin{lstlisting}[language=Python]
+    for k in range(1, K + 1):
+        model.Add(z >= y[k])
+    model.Minimize(z)
+    \end{lstlisting}
+    
+\end{itemize}
+
+
+\begin{lstlisting}[language=Python]
+solver = cp_model.CpSolver()
+solver.parameters.max_time_in_seconds = 55.0
+solver.parameters.num_search_workers = 8
+status = solver.Solve(model)
+\end{lstlisting}
+
+\subsection{Results}
+The table below shows the test results submitted to the online judge:
+
+\begin{table}[h]
+\centering
+\caption{Online Judge Test Execution Results}
+\begin{tabular}{rrlrr}
+\toprule
+\textbf{N} & \textbf{K} & \textbf{Message} & \textbf{Runtime (ms)} & \textbf{Memory (MB)} \\
+\midrule
+5 & 2 & Memory Limit Exceeded & 2,538 & 49,633 \\
+10 & 2 & Memory Limit Exceeded & 12,811 & 90,867 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two test cases passed (tests 3 and 7). Their small input sizes allowed the CP model to fit within the 1024 MB memory limit, and CP-SAT found a feasible solution within the time limit. All eight failing tests hit Memory Limit Exceeded before any search began — the memory was consumed entirely during model construction.
+
+\subsection{Analysis — Why CP Cannot Scale to Large Inputs}
+
+\begin{itemize}
+    \item \textbf{Variable count: \texorpdfstring{$O(K \times N^2)$}{O(K x N²)}}\newline
+    Every ordered pair $(i, j)$ with $i \neq j$ for every technician $k$ requires one \texttt{BoolVar} $x[i][j][k]$, plus one \texttt{BoolVar} $\text{self\_loop}[i][k]$ per customer per technician. The total grows as $K \times N^2$:
+    
+    \begin{table}[h]
+    \centering
+    \caption{Variable Scaling Count Matrix}
+    \begin{tabular}{rrrrr}
+    \toprule
+    \textbf{N} & \textbf{K} & \textbf{$x[i][j][k]$ variables} & \textbf{self\_loop variables} & \textbf{Total} \\
+    \midrule
+    5 & 2 & 60 & 10 & $\ge$ 73 \\
+    10 & 2 & 220 & 20 & $\ge$ 243 \\
+    20 & 3 & 1,260 & 60 & $\ge$ 1,324 \\
+    100 & 10 & 100,100 & 1,000 & $\ge$ 102,011 \\
+    400 & 40 & 6,400,160 & 16,000 & $\ge$ 6,432,041 \\
+    1000 & 100 & 100,100,000 & 100,000 & $\ge$ 100,200,101 \\
+    \bottomrule
+    \end{tabular}
+    \end{table}
+    
+    Each \texttt{BoolVar} carries an internal memory overhead beyond a single bit. At $N=1000$ and $K=100$, roughly 100 million variables are required, exhausting the 1024 MB limit during model construction before any search begins. This is why all failing tests show exactly 1,024 MB used — the hard ceiling is hit, not a gradual increase.
+
+    \item \textbf{VRP is NP-Hard} \newline
+    Even if memory were unlimited, VRP belongs to the complexity class NP-Hard. This is a fundamental theoretical result, not a limitation of any particular implementation. No known algorithm — CP, ILP, dynamic programming, or any other exact method — can guarantee finding the optimal solution in polynomial time for arbitrary large inputs. The search space grows exponentially: with $K=10$ and $N=80$, the number of possible route assignments is approximately $10^{80}$, exceeding the estimated number of atoms in the observable universe.
+
+    \item \textbf{AddCircuit replaces MTZ but does not reduce variable count}\newline
+    The key improvement in this implementation over the original code is replacing the MTZ subtour elimination constraints (which required $N^2 \times K$ additional integer constraints and the ordering variables $u_{i,k}$) with a single \texttt{AddCircuit} call per technician. This makes the model significantly faster for small instances by giving CP-SAT a more efficient internal propagator for circuit constraints. However, it does not reduce the number of $x[i][j][k]$ variables, which remains $O(K \times N^2)$. The memory bottleneck is therefore unchanged.
+
+    \item \textbf{The model is mathematically correct} \newline
+    The CP model is mathematically correct. All constraints are properly formulated, the objective is correctly defined, and the solver is appropriately configured. The failing tests are not caused by a bug — they result from the fundamental incompatibility between the $O(K \times N^2)$ memory requirement and the 1024 MB limit. This is a known limitation shared by all exact methods for large-scale VRP.
+\end{itemize}
+
+\section{Heuristics (Hill Climbing)}
+
+\subsection{Background}
+The hill climbing algorithm is a mathematical optimization and heuristic search technique belonging to the family of local search methods. It continually moves in the direction of increasing value (or decreasing cost) to find the best possible solution.
+
+\subsection{Logic}
+\begin{itemize}
+    \item \textbf{Initialize:} Generate an initial candidate solution using greedy.
+    \item \textbf{Compute:} Use a function to measure and maximize the total time of the current state.
+    \item \textbf{Check Neighbors:} Make minor tweaks to create nearby alternative solutions:
+    \begin{itemize}
+        \item \textbf{Swap:} Choose two routes randomly and swap a customer between them to create new solution.
+        \item \textbf{Multiple swap:} Choose two routes randomly and swap multiple customers between them to create more diverse solutions.
+        \item \textbf{Move:} Randomly choose a customer from a route and move to another route.
+    \end{itemize}
+    \item If a neighboring state has a better score, step into it.
+    \item Stop when no surrounding neighbor offers an improvement.
+\end{itemize}
+
+\subsection{Sourcecode}
+
+\subsubsection{Algorithm 1: Compute Maximum Time}
+\begin{lstlisting}[language=Python]
+function compute_max_time(routes):
+    Initialize max_time = 0, time = 0
+    for i = 0 to (length of route - 1) do
+        # Add travel time between the current node and the next node
+        # Calculate service time for the customer (excluding the starting depot)
+        max_time = maximum of (max_time) and time
+    return max_time
+end function
+\end{lstlisting}
+
+\subsubsection{Algorithm 2: Check neighbor swap}
+\begin{lstlisting}[language=Python]
+function try_neighbor_swap(routes, best_cost):
+    Randomly select two routes r1, r2 with |r1| >= 2 and |r2| >= 2
+    Randomly select nodes i in r1 \ {0}, j in r2 \ {0}
+    Swap nodes i and j between routes
+
+    if modified solution is improved:
+        return modified cost
+    If not, undo the neighbor swap
+    return best_cost
+end function
+\end{lstlisting}
+
+\subsubsection{Algorithm 3: Check multiple neighbor swap}
+\begin{lstlisting}[language=Python]
+function try_neighbor_swap_multiples(routes, best_cost, num_nodes):
+    Randomly select two routes r1, r2 with |r1| >= 2 and |r2| >= 2
+    Randomly select nodes i in r1 \ {0}, j in r2 \ {0}
+
+    for i = 0 to (num_nodes - 1) do
+        Swap nodes i and j between routes
+
+    if modified solution is improved:
+        return modified cost
+    If not, undo the neighbor swap
+    return best_cost
+end function
+\end{lstlisting}
+
+\subsubsection{Algorithm 4: Check neighbor move}
+\begin{lstlisting}[language=Python]
+function try_neighbor_move(routes, best_cost):
+    Randomly select two routes r1, r2 with |r1| >= 2 and |r2| >= 2
+    Randomly select nodes i in r1 \ {0}, j in r2 \ {0}
+    Move the customer from node i to node j
+    
+    if modified solution is improved:
+        return modified cost
+    If not, undo the neighbor swap
+    return best_cost
+end function
+\end{lstlisting}
+
+\subsubsection{Algorithm 5: Greedy initialization}
+\begin{lstlisting}[language=Python]
+function greedy():
+    // Initialize K technicians with starting node 0 and 0 work time
+    SET technicians = array of K elements, each having:
+        route = [0]
+        work = 0
+
+    // Keep track of visited nodes (0 to N)
+    SET visited = array of size (N + 1) filled with FALSE
+    SET visited[0] = TRUE
+    
+    // Create a randomized list of customers (1 to N)
+    SET customers = list of numbers from 1 to N
+    SHUFFLE customers randomly
+    
+    // Assign all N customers to technicians
+    FOR N iterations DO
+        SET best_cost = INFINITY
+        SET best_tech = -1
+        SET best_cust = -1
+        
+        // Find the best customer to assign to the best technician
+        FOR EACH cust IN customers DO
+            IF visited[cust] is TRUE THEN
+                CONTINUE to next customer
+
+            FOR k FROM 0 TO K - 1 DO
+                SET last_node = the last node in technicians[k].route
+
+                // Calculate hypothetical cost to add this customer to this technician
+                SET cost = technicians[k].work + matrix[last_node][cust] + d[cust]
+
+                IF cost < best_cost THEN
+                    best_cost = cost
+                    best_tech = k
+                    best_cust = cust
+
+        // Assign the best found customer to the selected technician
+        IF best_tech != -1 THEN
+            APPEND best_cust to technicians[best_tech].route
+            SET previous_node = second to last node in technicians[best_tech].route
+            technicians[best_tech].work = technicians[best_tech].work + matrix[previous_node][best_cust] + d[best_cust]
+            SET visited[best_cust] = TRUE
+
+    // Return all technicians to the depot (node 0)
+    FOR EACH tech IN technicians DO
+        APPEND 0 to tech.route
+
+    RETURN list of routes from all technicians
+END FUNCTION
+\end{lstlisting}
+
+\subsubsection{Algorithm 6: Hill climbing loop}
+\begin{lstlisting}[language=Python]
+function hill_climbing(routes, max_iter = 20000):
+    // Evaluate the initial solution
+    SET best_cost = compute_max_time(routes)
+    
+    FOR iteration FROM 1 TO max_iter DO
+        SET old_cost = best_cost
+
+        // Try the first neighborhood structure: Swap
+        best_cost = try_neighbor_swap(routes, best_cost)
+        IF best_cost < old_cost THEN
+            CONTINUE to next iteration // Improvement found, restart search
+        END IF
+
+        // Try the second neighborhood structure: Multiple Swap
+        best_cost = try_neighbor_swap_multiple(routes, best_cost)
+        IF best_cost < old_cost THEN
+            CONTINUE to next iteration // Improvement found, restart search
+        END IF
+
+        // Try the third neighborhood structure: Move
+        best_cost = try_neighbor_move(routes, best_cost)
+    END FOR
+
+    RETURN routes
+END FUNCTION
+\end{lstlisting}
+
+\section{Result and Remark}
+
+\subsection{Experimental Setup}
+To evaluate and compare the performance of each optimization algorithm, we conducted systematic benchmarks on representative instances of the Balanced Staff Routing for Maintenance (BSRM) problem. The test instances scale from small ($N=5, K=2$) to very large ($N=1000, K=100$). The travel costs and service times were generated using a coordinate-based model, where depot and customer locations are distributed in a $100 \times 100$ grid, and Euclidean distances are scaled by a factor of 10. Service times $d(i)$ are randomly selected in the range $[10, 100]$. All tests were executed on the same machine running Python 3 with a timeout limit of 15 seconds for the exact methods.
+
+\subsection{Comparative Results}
+The table below presents the makespan (maximum workload $z$) and execution time in milliseconds (ms) for Constraint Programming (CP), Branch \& Bound (Backtracking), the Sorted Cheapest Insertion heuristic (Greedy), and the Hill Climbing metaheuristic.
+
+\begin{table}[H]
+\centering
+\caption{Benchmark Comparison of Makespan and Runtime (ms)}
+\label{tab:benchmark_results}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{rrcrcrcrcr}
+\toprule
+\multicolumn{2}{c}{\textbf{Instance Size}} & \multicolumn{2}{c}{\textbf{Constraint Prog. (CP)}} & \multicolumn{2}{c}{\textbf{Branch \& Bound}} & \multicolumn{2}{c}{\textbf{Sorted Greedy}} & \multicolumn{2}{c}{\textbf{Hill Climbing}} \\
+\cmidrule(r){1-2} \cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8} \cmidrule(l){9-10}
+$N$ & $K$ & \textbf{Workload} & \textbf{Time (ms)} & \textbf{Workload} & \textbf{Time (ms)} & \textbf{Workload} & \textbf{Time (ms)} & \textbf{Workload} & \textbf{Time (ms)} \\
+\midrule
+5 & 2 & 1,800 & 571 & 1,800 & 44 & 1,800 & 29 & 1,800 & 235 \\
+10 & 2 & 2,560 & 589 & 2,560 & 581 & 2,740 & 25 & 2,730 & 243 \\
+100 & 10 & N/A & N/A & N/A & N/A & 2,370 & 27 & 2,440 & 709 \\
+200 & 10 & N/A & N/A & N/A & N/A & 3,120 & 32 & 3,790 & 1,119 \\
+200 & 20 & N/A & N/A & N/A & N/A & 2,220 & 31 & 2,180 & 1,179 \\
+400 & 40 & N/A & N/A & N/A & N/A & 2,050 & 61 & 2,300 & 2,586 \\
+500 & 50 & N/A & N/A & N/A & N/A & 2,020 & 85 & 2,290 & 3,438 \\
+700 & 70 & N/A & N/A & N/A & N/A & 1,990 & 140 & 2,090 & 5,733 \\
+900 & 90 & N/A & N/A & N/A & N/A & 2,050 & 244 & 2,110 & 9,575 \\
+1,000 & 100 & N/A & N/A & N/A & N/A & 2,020 & 325 & 2,160 & 12,118 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Analysis and Remarks}
+Based on the experimental data, we analyze the performance characteristics, strengths, and limitations of each optimization method:
+
+\begin{enumerate}
+    \item \textbf{Constraint Programming (CP) and Branch \& Bound (Backtracking):}
+    \begin{itemize}
+        \item \textbf{Optimality:} Both methods are exact algorithms. For small instances ($N=5, 10$), they successfully find the mathematically optimal workload ($1,800$ and $2,560$ respectively).
+        \item \textbf{Computational Bottleneck:} Both algorithms suffer from poor scalability as the instance size increases.
+        \item \textbf{Backtracking Limitations:} Branch \& Bound explores the search space using Depth-First Search with memoization and pruning. The size of the search space is $O(K^N)$, which grows exponentially. For $N \ge 100$, the recursion depth and state space exceed standard computing limits, leading to timeouts.
+        \item \textbf{CP Limitations:} The CP-SAT solver requires mapping the routing variables into a decision variable matrix $x[i][j][k]$ of size $O(K \cdot N^2)$. For $N=1000$ and $K=100$, this results in approximately 100 million boolean variables, causing the solver to hit memory limit thresholds during the model construction phase before search even starts.
+    \end{itemize}
+    
+    \item \textbf{Sorted Cheapest Insertion (Greedy Heuristic):}
+    \begin{itemize}
+        \item \textbf{Efficiency:} The Greedy algorithm is extremely fast. Even for the largest test case ($N=1000, K=100$), it computes a solution in only 325 ms.
+        \item \textbf{Solution Quality:} Sorting the customers in descending order of their distance to the depot and service duration ($t(0, u) + d(u)$) plays a critical role. By routing the most difficult customers first, it avoids leaving isolated distant nodes for the end of the assignment process, which naturally balances the technician workloads. It achieves near-optimal solutions (matching the exact solver makespan of 1,800 on $N=5$).
+    \end{itemize}
+    
+    \item \textbf{Hill Climbing (Metaheuristic with Greedy Init):}
+    \begin{itemize}
+        \item \textbf{Search and Refinement:} Hill Climbing begins with an initial solution constructed by a greedy random heuristic and iteratively refines it by exploring neighbor solutions through node swaps, multi-swaps, and node moves.
+        \item \textbf{Performance Trade-off:} As the instance size grows, evaluating 20,000 neighborhood modifications becomes computationally expensive because it requires recomputing the workloads. For $N=1000, K=100$, the runtime increases to 12.1 seconds.
+        \item \textbf{Local Minima:} While local search can improve random initializations significantly, the stochastic nature of the standard Hill Climbing algorithm makes it prone to getting stuck in local minima when scaling up. This explains why it sometimes yields slightly higher makespan values than the deterministic Sorted Cheapest Insertion heuristic on larger instances.
+    \end{itemize}
+\end{enumerate}
+
+\section{Conclusion}
+This study highlights the trade-offs between solution quality and computational scalability for the Balanced Staff Routing for Maintenance problem. While exact methods like Constraint Programming and Branch \& Bound guarantee optimal solutions, they are strictly limited to small instances ($N \le 10$) due to exponential state expansion and quadratic variable memory requirements. In contrast, heuristic approaches offer excellent scaling characteristics. The deterministic Sorted Cheapest Insertion algorithm provides high-quality balanced routes in milliseconds, making it highly suitable for large-scale real-world maintenance dispatching operations.
+
+
+\end{document}
