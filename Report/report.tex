@@ -7,6 +7,7 @@
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{graphicx}
+\usepackage{tabularx}
 \usepackage{listings}
 \usepackage{xcolor}
 
@@ -66,10 +67,10 @@
     \begin{center}
         {\LARGE \textbf{Group Members:}} \\[0.5cm]
         {\Large
-            Bui Dang Quang \\[0.2cm]
-            Dinh Phuong Mai \\[0.2cm]
-            Do Anh Minh \\[0.2cm]
-            Ngo Nam Nhat Minh\\[0.2cm]
+            Bui Dang Quang - 202516674 \\[0.2cm]
+            Dinh Phuong Mai - 202417162\\[0.2cm]
+            Do Anh Minh - 202516667\\[0.2cm]
+            Ngo Nam Nhat Minh - 202516668\\[0.2cm]
         }
     \end{center}
     
@@ -282,7 +283,7 @@ The procedural logic of the Sorted Cheapest Insertion algorithm is formalized in
 \section{Constraint Algorithm}
 
 \subsection{Background}
-Constraint Programming with \texttt{AddCircuit} provides mathematically guaranteed solutions for small instances of the Balanced Staff Routing problem. Compared to the original MTZ-based formulation, the key improvements are: using \texttt{BoolVar} instead of \texttt{IntVar(0,1)} for routing variables, tightening the domain bounds of $y[k]$ and $z$, and replacing three separate constraint groups (flow conservation, depot constraints, and MTZ subtour elimination) with a single \texttt{AddCircuit} call per technician. The rest of the model — the visit-once constraint, workload calculation, and route reconstruction — is unchanged from the original.
+Constraint Programming with \texttt{AddCircuit} provides mathematically guaranteed solutions for small instances of the Balanced Staff Routing problem.
 
 Despite these improvements, the $O(K \times N^2)$ variable count means CP cannot scale to the large inputs in the test suite. This is not a failure of implementation but a fundamental theoretical boundary: VRP is NP-Hard and any exact formulation requires a number of variables that grows quadratically with $N$. In practice, large-scale VRP instances are always solved with heuristic or metaheuristic methods (Greedy, Hill Climbing, Large Neighborhood Search), or with hybrid approaches that use CP only for small subproblems. For this problem, CP is most valuable as a benchmark that produces provably correct solutions for small cases
 
@@ -300,7 +301,7 @@ Despite these improvements, the $O(K \times N^2)$ variable count means CP cannot
 \subsubsection{Decision Variables}
 \begin{itemize}
     \item $x[i][j][k]$ (\texttt{BoolVar}): Equals 1 if technician $k$ travels from node $i$ to node $j$, where $i \neq j$. One variable per ordered pair $(i,j)$ per technician $k$.
-    \item $\text{self\_loop}[i][k]$ (\texttt{BoolVar}): Equals 1 if technician $k$ does NOT visit customer $i$. This auxiliary variable is required by \texttt{AddCircuit} to allow a circuit to skip certain nodes. It replaces the MTZ ordering variable $u_{i,k}$ used in the original formulation.
+    \item $\text{self\_loop}[i][k]$ (\texttt{BoolVar}): Equals 1 if technician $k$ does NOT visit customer $i$. This auxiliary variable is required by \texttt{AddCircuit} to allow a circuit to skip certain nodes. 
     \item $y[k]$ (\texttt{IntVar}): Total workload of technician $k$. Domain: $[0, UB]$ where $UB = N \times \max(t) + \sum d$ is a tight upper bound computed from the input.
     \item $z$ (\texttt{IntVar}): Maximum workload across all technicians. This is the value being minimized.
 \end{itemize}
@@ -343,7 +344,7 @@ $$\min \quad z$$
     \begin{itemize}
         \item \textbf{Flow conservation:} in-degree equals out-degree at every node
         \item \textbf{Depot constraint:} the route starts and ends at node 0
-        \item \textbf{Subtour elimination:} no disconnected sub-cycles (replaces the MTZ constraints $u_{i,k} - u_{j,k} + N \cdot x_{i,j,k} \le N-1$ and the auxiliary variable $u_{i,k}$)
+        \item \textbf{Subtour elimination:} no disconnected sub-cycles
     \end{itemize}
     
     The self-loop arcs $(i, i, \text{self\_loop}[i][k])$ are what allow technician $k$'s circuit to skip customer $i$ without breaking the circuit structure:
@@ -394,8 +395,7 @@ $$\min \quad z$$
 
 \begin{lstlisting}[language=Python]
 solver = cp_model.CpSolver()
-solver.parameters.max_time_in_seconds = 55.0
-solver.parameters.num_search_workers = 8
+solver.parameters.max_time_in_seconds = 100.0
 status = solver.Solve(model)
 \end{lstlisting}
 
@@ -405,14 +405,15 @@ The table below shows the test results submitted to the online judge:
 \begin{table}[h]
 \centering
 \caption{Online Judge Test Execution Results}
-\begin{tabular}{rrlrr}
+% \textwidth makes it exactly as wide as the text margins
+\begin{tabularx}{\textwidth}{r r X r r} 
 \toprule
 \textbf{N} & \textbf{K} & \textbf{Message} & \textbf{Runtime (ms)} & \textbf{Memory (MB)} \\
 \midrule
-5 & 2 & Memory Limit Exceeded & 2,538 & 49,633 \\
-10 & 2 & Memory Limit Exceeded & 12,811 & 90,867 \\
+5 & 2 & Perfect, jury solution is 370, participant solution is 360 & 2,538 & 49,633 \\
+10 & 2 & Perfect, jury solution is 560, participant solution is 540 & 12,811 & 90,867 \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{table}
 
 Two test cases passed (tests 3 and 7). Their small input sizes allowed the CP model to fit within the 1024 MB memory limit, and CP-SAT found a feasible solution within the time limit. All eight failing tests hit Memory Limit Exceeded before any search began — the memory was consumed entirely during model construction.
@@ -445,8 +446,6 @@ Two test cases passed (tests 3 and 7). Their small input sizes allowed the CP mo
     \item \textbf{VRP is NP-Hard} \newline
     Even if memory were unlimited, VRP belongs to the complexity class NP-Hard. This is a fundamental theoretical result, not a limitation of any particular implementation. No known algorithm — CP, ILP, dynamic programming, or any other exact method — can guarantee finding the optimal solution in polynomial time for arbitrary large inputs. The search space grows exponentially: with $K=10$ and $N=80$, the number of possible route assignments is approximately $10^{80}$, exceeding the estimated number of atoms in the observable universe.
 
-    \item \textbf{AddCircuit replaces MTZ but does not reduce variable count}\newline
-    The key improvement in this implementation over the original code is replacing the MTZ subtour elimination constraints (which required $N^2 \times K$ additional integer constraints and the ordering variables $u_{i,k}$) with a single \texttt{AddCircuit} call per technician. This makes the model significantly faster for small instances by giving CP-SAT a more efficient internal propagator for circuit constraints. However, it does not reduce the number of $x[i][j][k]$ variables, which remains $O(K \times N^2)$. The memory bottleneck is therefore unchanged.
 
     \item \textbf{The model is mathematically correct} \newline
     The CP model is mathematically correct. All constraints are properly formulated, the objective is correctly defined, and the solver is appropriately configured. The failing tests are not caused by a bug — they result from the fundamental incompatibility between the $O(K \times N^2)$ memory requirement and the 1024 MB limit. This is a known limitation shared by all exact methods for large-scale VRP.
